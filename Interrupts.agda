@@ -7,7 +7,7 @@ module Interrupts where
 ------------------------------------------------------------------------
 
 
-open import NonDeterm
+open import NonDeterm public
 open import Data.Nat
 open import Data.Maybe hiding (_>>=_)
 open import Data.Product 
@@ -58,7 +58,7 @@ mutual
     return (just n)
   eval' (Block x) i = eval x B
   eval' (Unblock x) i = eval x U
-  eval' Interrupt i = return nothing
+  eval' Throw i = return nothing
 
 
 
@@ -92,6 +92,12 @@ Stack = List Elem
 Conf : Set
 Conf = Stack × Status
 
+
+-- We use the TERMINATING pragma since Agda does not recognize that
+-- `exec` is terminating. We prove that `exec` is terminating
+-- separately in the `Terminating.Interrupts` module.
+
+{-# TERMINATING #-}
 mutual
   exec : Code → Conf → ND Conf
   exec (PUSH n c) (s , i) = exec c (VAL n ∷ s , i) ⊕ inter s i

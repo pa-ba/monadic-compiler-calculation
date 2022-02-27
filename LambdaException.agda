@@ -129,6 +129,9 @@ Stack = List Elem
 Conf : Set
 Conf = Stack × Env'
 
+-- We use the TERMINATING pragma since Agda does not recognize that
+-- `exec` is terminating. We prove that `exec` is terminating
+-- separately in the `Terminating.LambdaException` module.
 
 mutual
   {-# TERMINATING #-}

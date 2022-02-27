@@ -9,7 +9,7 @@
 
 module InterruptsLoop where
 
-open import PartialNonDeterm
+open import PartialNonDeterm public
 open import Data.Nat
 open import Data.Maybe hiding (_>>=_)
 open import Data.Product 
@@ -102,6 +102,11 @@ Stack = List Elem
 Conf : Set
 Conf = Stack × Status
 
+-- We use the TERMINATING pragma since Agda does not recognize that
+-- `exec` is terminating. We prove that `exec` is terminating
+-- separately in the `Terminating.InterruptsLoop` module.
+
+{-# TERMINATING #-}
 mutual
   exec : ∀ {i} → Code → Conf → PND Conf i
   exec (PUSH n c) (s , i) = exec c (VAL n ∷ s , i) ⊕ inter s i
@@ -114,14 +119,9 @@ mutual
   exec (UNBLOCK c) (s , i) = exec c (STA i ∷ s , U) ⊕ inter s i
   exec (UNMARK c) (VAL n ∷ HAN _ ∷ s , i) = exec c (VAL n ∷ s , i)
   exec (MARK c' c) (s , i) = exec c (HAN c' ∷ s , i) ⊕ inter s i
-  exec LOOP (s , i) = exec' LOOP (s , i) ⊕ inter s i
+  exec LOOP (s , i) = later(∞exec LOOP (s , i)) ⊕ inter s i
   exec HALT c = return c
   exec _ _ = zero
-
-  exec' : ∀ {i} → Code → Conf → PND Conf i
-  exec' e x = later (∞exec e x)
-
-
 
   ∞exec : ∀ {i} → Code → Conf → ∞PND Conf i
   force (∞exec c x) = exec c x

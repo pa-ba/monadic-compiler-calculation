@@ -16,6 +16,7 @@ open import Data.Product
 open import Data.Bool renaming (_≤_ to _≤b_;_<_ to _<b_)
 open import Category.Monad public
 open import Category.Monad.Indexed public
+open import Category.Functor public
 open import Level renaming (zero to lzero; suc to lsuc) public
 open import Data.Maybe renaming (_>>=_ to _M>>=_)
 open import Function
@@ -120,7 +121,7 @@ mutual
 -- indexed bisimilarity implies bisimilairity
 
 mutual
-  stepped : ∀ {A} (a b : Partial A ∞) → (∀ i → a ~[ i ] b) → a ~ b
+  stepped : ∀ {A} {i} (a b : Partial A ∞) → (∀ i → a ~[ i ] b) → _~_ {i} a b
   stepped (now x) (now y) eq with eq 1
   ... | ~inow _ _  =  ~now x
   stepped (now x) (later y) eq with eq 1
@@ -131,7 +132,7 @@ mutual
     where stepped-later : ∀ {A} i (a b : ∞Partial A ∞) →
                          (later a  ~[ suc i ] later b) →  force a ~[ i ] force b
           stepped-later i a b (~ilater eq) =  eq
-  ∞stepped : ∀ {A} (a b : ∞Partial A ∞) → (∀ i → force a ~[ i ] force b) → a ∞~ b
+  ∞stepped : ∀ {A} {i} (a b : ∞Partial A ∞) → (∀ i → force a ~[ i ] force b) →  _∞~_ {i} a b
   ~force (∞stepped a b eq) =  stepped (force a) (force b)  eq
 
 -- reflexivity

@@ -241,7 +241,7 @@ bind-cong-conv (iconv-later c) d =  iconv-later (bind-cong-conv c  d)
 
 bind-cong-conv' : ∀ {i A B} {a : PND A ∞} {f : A → PND B ∞} {w : B} 
                   → (a >>= f) ⇓[ i ] w → ∃[ v ] ∃[ i1 ] ∃[ i2 ] (i ≡ i1 + i2 × a ⇓[ i1 ] v × f v ⇓[ i2 ] w)
-bind-cong-conv' {i} {a = now x} c =  x , 0 , i ,  refl , iconv-now x , c -- x ,  i ,  ≤-refl ,  iconv-now x , c
+bind-cong-conv' {i} {a = now x} c =  x , 0 , i ,  refl , iconv-now x , c
 bind-cong-conv' {a = a1 ⊕ a2} (iconv-l c .(a2 Bind.>>= _)) with bind-cong-conv' {a = a1} c
 ... | v' , i1 , i2 , eq , d1 , d2 =  v' , i1 , i2 , eq ,  iconv-l d1 a2 , d2
 bind-cong-conv' {a = a1 ⊕ a2} (iconv-r .(a1 Bind.>>= _) c) with bind-cong-conv' {a = a2} c
@@ -251,8 +251,8 @@ bind-cong-conv' {a = later x} (iconv-later c) with bind-cong-conv' {a = force x}
 
 
 
-lemma : ∀ {i} i1 i2 → suc (i1 + i2) ≤ i →  i1 + suc i2 ≤ i
-lemma i1 i2 le rewrite +-suc i1 i2 =  le
+≤+suc : ∀ {i} i1 i2 → suc (i1 + i2) ≤ i →  i1 + suc i2 ≤ i
+≤+suc i1 i2 le rewrite +-suc i1 i2 =  le
 
 bind-cong-r : ∀ {i A B}  (a : PND A ∞)
               {k l : A → PND B ∞} (h : ∀ a → (k a) ~[ i ] (l a)) →
@@ -262,11 +262,11 @@ bind-cong-r {i} {A} {B} a {k} {l} h = imk~ le1' ri1' (le2' a) (ri2' a)
   where le1' : {v : B} {j : ℕ} → j < i → (a >>= k) ⇓[ j ] v → (a >>= l) ⇓[ j ] v
         le1' le c with bind-cong-conv' {a = a} c
         ... | v' , i1 , i2 , refl , d1 , d2 = bind-cong-conv d1
-                                              (~iconv-l (h v') (m+n≤o⇒n≤o _ (lemma i1 i2 le)) d2)
+                                              (~iconv-l (h v') (m+n≤o⇒n≤o _ (≤+suc i1 i2 le)) d2)
         ri1' : {v : B} {j : ℕ} → j < i → (a >>= l) ⇓[ j ] v → (a >>= k) ⇓[ j ] v
         ri1' le c with bind-cong-conv' {a = a} c
         ... | v' , i1 , i2 , refl , d1 , d2 = bind-cong-conv d1
-                                              (~iconv-r (h v') (m+n≤o⇒n≤o _ (lemma i1 i2 le)) d2)                                              
+                                              (~iconv-r (h v') (m+n≤o⇒n≤o _ (≤+suc i1 i2 le)) d2)                                              
         le2' : ∀ a → {j : ℕ} → j < i → (a >>= k) ⇓[ j ] → (a >>= l) ⇓[ j ]
         le2' (now x) le c = ~idiv-l  (h x) le c
         le2' (zero) le c = iconv-zero

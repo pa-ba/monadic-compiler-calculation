@@ -6,7 +6,7 @@
 -- addition.
 ------------------------------------------------------------------------
 
-module Lambda where
+module LambdaCBName where
 
 
 open import Partial public
@@ -27,13 +27,18 @@ data Expr : Set where
   App : Expr → Expr → Expr
   Var : ℕ → Expr
 
+data Thunk : Set where
+  thunk : Expr → List Thunk → Thunk
+
 mutual
   data Value : Set where
     Num : ℕ → Value
     Clo : Expr → Env → Value
 
   Env : Set
-  Env = List Value
+  Env = List Thunk
+
+
 
 
 getVar : ∀ {a i} → ℕ → List a → Partial a i
@@ -41,6 +46,8 @@ getVar 0 (x ∷ xs) = return x
 getVar (suc i) (x ∷ xs) = getVar i xs
 getVar _ _ = never
 
+getThunk : Thunk → Expr × Env
+getThunk (thunk x e) = x , e
 
 -- The following two functions are used instead of partial pattern
 -- matching. Agda supports an Idris-style pattern matching syntax
@@ -63,11 +70,12 @@ mutual
     do n ← eval x e >>= getNum
        m ← eval y e >>= getNum
        return (Num (n + m))
-  eval (Var i) e = getVar i e
+  eval (Var i) e = do
+    x , e' ← getThunk <$> getVar i e
+    later (∞eval x e')
   eval (Abs x)   e = return (Clo x e)
   eval (App x y) e = do (x' , e') <- eval x e >>= getClo
-                        v <- eval y e
-                        later (∞eval x' (v ∷ e'))
+                        later (∞eval x' (thunk y e ∷ e'))
 
   ∞eval : ∀ {i} → Expr → Env → ∞Partial Value i
   force (∞eval x e) = eval x e
@@ -82,9 +90,14 @@ data Code : Set where
   ADD : Code → Code
   LOOKUP : ℕ → Code → Code
   RET : Code
-  APP : Code → Code
+  APP : Code → Code → Code
   ABS : Code → Code → Code
   HALT : Code
+
+
+data Thunk' : Set where
+  thunk' : Code → List Thunk' → Thunk'
+
 
 mutual
   data Value' : Set where
@@ -92,7 +105,7 @@ mutual
     Clo' : Code → Env' → Value'
 
   Env' : Set
-  Env' = List Value'
+  Env' = List Thunk'
   
 
 data Elem : Set where
@@ -106,20 +119,24 @@ Stack = List Elem
 Conf : Set
 Conf = Stack × Env'
 
+getThunk' : Thunk' → Code × Env'
+getThunk' (thunk' c e) = c , e
+
+
 
 -- We use the TERMINATING pragma since Agda does not recognize that
 -- `exec` is terminating. We prove that `exec` is terminating
--- separately in the `Terminating.Lambda` module.
+-- separately in the `Terminating.LambdaCBName` module.
 
 mutual
   {-# TERMINATING #-}
   exec : ∀ {i} → Code → Conf → Partial Conf i
   exec (PUSH n c) (s , e) = exec c (VAL (Num' n) ∷ s , e)
   exec (ADD c) (VAL (Num' n) ∷ VAL (Num' m) ∷ s , e) = exec c (VAL (Num' (m + n)) ∷ s , e)
-  exec (LOOKUP n c) (s , e) = do v <- getVar n e
-                                 exec c (VAL v ∷ s , e)
+  exec (LOOKUP n c) (s , e) = do c' , e' <- getThunk' <$> getVar n e
+                                 later (∞exec c' (CLO c e  ∷ s , e'))
   exec RET  (VAL u ∷ CLO c e' ∷ s , _) = exec c (VAL u ∷ s , e')
-  exec (APP c) (VAL v ∷ VAL (Clo' c' e') ∷ s , e) = later (∞exec c' (CLO c e ∷ s , v ∷ e'))
+  exec (APP c' c) (VAL (Clo' c'' e') ∷ s , e) = later (∞exec c'' (CLO c e ∷ s , thunk' c' e ∷ e'))
   exec (ABS c' c) (s , e) = exec c (VAL (Clo' c' e) ∷ s , e)
   exec HALT c = return c
   exec _ _ = never
@@ -137,7 +154,7 @@ comp : Expr → Code → Code
 comp (Val n) c =  PUSH n c
 comp (Add x y) c = comp x (comp y (ADD c))
 comp (Var i) c = LOOKUP i c
-comp (App x y) c = comp x (comp y (APP c))
+comp (App x y) c = comp x (APP (comp y RET) c)
 comp (Abs x) c = ABS (comp x RET) c
 
 
@@ -149,52 +166,59 @@ comp (Abs x) c = ABS (comp x RET) c
 
 
 mutual
-  conv : Value → Value'
-  conv (Clo x' e') = Clo' (comp x' RET) (convE e')
-  conv (Num n) = Num' n
+  convV : Value → Value'
+  convV (Clo x' e') = Clo' (comp x' RET) (convE e')
+  convV (Num n) = Num' n
+  
+  convT : Thunk → Thunk'
+  convT (thunk x e) = thunk' (comp x RET) (convE e)
 
   convE : Env → Env'
   convE [] = []
-  convE (x ∷ xs) = conv x ∷ convE xs
+  convE (x ∷ xs) = convT x ∷ convE xs
 
 
--- This is the lemma that is used in the `Var` case.
-getVar-conv : ∀ {i A} n e → (f : Value' → Partial A ∞) →
-  (getVar n e >>= λ v → f (conv v)) ~[ i ] (getVar n (convE e) >>= f)
-getVar-conv zero (x ∷ e) f =  ~irefl
-getVar-conv (suc n) (x ∷ e) f = getVar-conv n e f
-getVar-conv (suc n) [] f =  ~itrans never-bind ( ~isymm never-bind)
-getVar-conv zero [] f = ~itrans never-bind ( ~isymm never-bind)
+-- -- This is the lemma that is used in the `Var` case.
 
+getVar-conv : ∀ {i A} n e → (f : Code × Env' → Partial A ∞) →
+  (getThunk <$> getVar n e >>= (λ { (x , e') → f (comp x RET , convE e')}))
+    ~[ i ] (getThunk' <$> getVar n (convE e) >>= f)
+getVar-conv zero [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
+            ~isymm ( ~itrans ( bind-cong-l  never-bind) never-bind))) 
+getVar-conv zero (thunk x e' ∷ e) f =  ~irefl
+getVar-conv (suc n) [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
+            ~isymm ( ~itrans ( bind-cong-l  never-bind) never-bind))) 
+getVar-conv (suc n) (x ∷ e) f =  getVar-conv n e f
 
 -- This is the compiler correctness property in its i-bisimilarity
 -- form. This is where the calculation happens.
 
 spec : ∀ i x {s c e} →
   (do v ← eval x e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~[ i ]
   (exec (comp x c) (s , convE e))
 spec zero _ =  ~izero
 spec i (Val x) {s} {c} {e}  =
   (do v ← eval (Val x) e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
   (exec (comp (Val x) c) (s , convE e))
   ∎
+  
 spec i (Add x y) {s} {c} {e} =
   (do v ← eval (Add x y) e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
   (do v <- (do n ← eval x e >>= getNum
                m ← eval y e >>= getNum
                return (Num (n + m)))
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨ bind-assoc (eval x e >>= getNum) ⟩
   (do n ← eval x e >>= getNum
       v <- (do m ← eval y e >>= getNum
                return (Num (n + m)))
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨ bind-cong-r (eval x e >>= getNum) (\ n -> bind-assoc (eval y e >>= getNum))⟩
   (do n ← eval x e >>= getNum
       m ← eval y e >>= getNum
@@ -213,87 +237,89 @@ spec i (Add x y) {s} {c} {e} =
    ⟩
   (do n ← eval x e
       m ← eval y e >>= getNum
-      exec (ADD c) (VAL (Num' m) ∷ VAL (conv n) ∷ s , convE e))
+      exec (ADD c) (VAL (Num' m) ∷ VAL (convV n) ∷ s , convE e))
   ~⟨  bind-cong-r (eval x e) ( λ n →
         ~itrans (bind-assoc (eval y e)) ( bind-cong-r (eval y e) 
         (λ {(Num n) → ~irefl;
         (Clo _ _) → never-bind})))⟩
   (do n ← eval x e
       m ← eval y e
-      exec (ADD c) (VAL (conv m) ∷ VAL (conv n) ∷ s , convE e))
+      exec (ADD c) (VAL (convV m) ∷ VAL (convV n) ∷ s , convE e))
   ~⟨  bind-cong-r (eval x e) (λ n → spec i y ) ⟩
   (do n ← eval x e
-      exec (comp y (ADD c)) (VAL (conv n) ∷ s , convE e))
+      exec (comp y (ADD c)) (VAL (convV n) ∷ s , convE e))
   ~⟨ spec i x ⟩
   (exec (comp x (comp y (ADD c))) (s , convE e))
   ∎  
 
-spec i (Var n) {s} {c} {e} =
+spec i@(suc j) (Var n) {s} {c} {e} =
   (do v ← eval (Var n) e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
-  (do v ← getVar n e
-      exec c (VAL (conv v) ∷ s , convE e))
+    (do v <- do x , e' ← getThunk <$> getVar n e
+                later (∞eval x e')
+        exec c (VAL (convV v) ∷ s , convE e))
+  ~⟨ bind-assoc (getThunk <$> getVar n e) ⟩
+    (do x , e' ← getThunk <$> getVar n e
+        v <- later (∞eval x e')
+        exec c (VAL (convV v) ∷ s , convE e))
+  ~⟨⟩
+    (do x , e' ← getThunk <$> getVar n e
+        v <- later (∞eval x e')
+        exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE e'))
+  ~⟨⟩
+    (do x , e' ← getThunk <$> getVar n e
+        later (∞eval x e' ∞>>= (λ v →
+          exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE e'))))
+  ~⟨ bind-cong-r (getThunk <$> getVar n e) (λ {(x , e') → ~ilater (spec j x)}) ⟩
+    (do x , e' ← getThunk <$> getVar n e
+        later (∞exec (comp x RET) (CLO c (convE e) ∷ s , convE e')))
   ~⟨ getVar-conv n e _ ⟩
-  (do v ← getVar n (convE e)
-      exec c (VAL v ∷ s , convE e))
+    (do c' , e' ← getThunk' <$> getVar n (convE e)
+        later (∞exec c' (CLO c (convE e) ∷ s , e')))
   ~⟨⟩
-  (exec (LOOKUP n c) (s , convE e))
+    (exec (LOOKUP n c) (s , convE e))
   ∎
 
 spec i@(suc j) (App x y) {s} {c} {e} =
   (do v ← eval (App x y) e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
   (do v ← do x' , e' <- eval x e >>= getClo
-             v <- eval y e
-             later (∞eval x' (v ∷ e'))
-      exec c (VAL (conv v) ∷ s , convE e))
-  ~⟨ bind-assoc ( eval x e >>= getClo) ⟩
+             later (∞eval x' (thunk y e ∷ e'))
+      exec c (VAL (convV v) ∷ s , convE e))
+  ~⟨ bind-assoc (eval x e >>= getClo ) ⟩
   (do x' , e' <- eval x e >>= getClo
-      v ← do v <- eval y e
-             later (∞eval x' (v ∷ e'))
-      exec c (VAL (conv v) ∷ s , convE e))
-  ~⟨ bind-cong-r (eval x e >>= getClo) (λ _ → bind-assoc (eval y e)) ⟩
-  (do x' , e' <- eval x e >>= getClo
-      v <- eval y e
-      w ← later (∞eval x' (v ∷ e'))
-      exec c (VAL (conv w) ∷ s , convE e))
+      v ← later (∞eval x' (thunk y e ∷ e'))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
   (do x' , e' <- eval x e >>= getClo
-      v <- eval y e
-      w ← later (∞eval x' (v ∷ e'))
-      exec RET (VAL (conv w) ∷ CLO c (convE e) ∷ s , convE (v ∷ e')))
+      v ← later (∞eval x' (thunk y e ∷ e'))
+      exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE (thunk y e ∷ e')))
   ~⟨⟩
   (do x' , e' <- eval x e >>= getClo
-      v <- eval y e
-      later(∞eval x' (v ∷ e') ∞>>= λ w →
-       exec RET (VAL (conv w) ∷ CLO c (convE e) ∷ s , convE (v ∷ e'))))
-  ~⟨ bind-cong-r (eval x e >>= getClo) (λ (x' , e') → bind-cong-r (eval y e)
-                 (λ v →  ~ilater ( spec j x') )) ⟩
+      later (∞eval x' (thunk y e ∷ e') ∞>>= λ v →
+        exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE (thunk y e ∷ e'))))
+  ~⟨  bind-cong-r (eval x e >>= getClo) ( λ {(x' , e') → ~ilater (spec j x')}) ⟩
   (do x' , e' <- eval x e >>= getClo
-      v <- eval y e
-      later (∞exec (comp x' RET) (CLO c (convE e) ∷ s , convE (v ∷ e'))))
+      later (∞exec (comp x' RET) (CLO c (convE e) ∷ s , convE (thunk y e ∷ e'))))
   ~⟨⟩
   (do x' , e' <- eval x e >>= getClo
-      v <- eval y e
-      exec (APP c) (VAL (conv v) ∷ VAL (Clo' (comp x' RET) (convE e')) ∷ s , convE e))
-  ~⟨ ~itrans (bind-assoc (eval x e)) ( bind-cong-r (eval x e)
-      λ {(Num _) →  ~itrans never-bind (~isymm (bind-never (eval y e))) ;
-         (Clo x e) → ~irefl}) ⟩
-  (do w <- eval x e
-      v <- eval y e
-      exec (APP c) (VAL (conv v) ∷ VAL (conv w) ∷ s , convE e))
-  ~⟨ bind-cong-r (eval x e) (λ w → spec i y) ⟩
-  (do w <- eval x e
-      exec (comp y (APP c)) (VAL (conv w) ∷ s , convE e))
+      later (∞exec (comp x' RET) (CLO c (convE e) ∷ s , thunk' (comp y RET) (convE e) ∷ convE e')))
+  ~⟨⟩
+   (do x' , e' <- eval x e >>= getClo
+       exec (APP (comp y RET) c) (VAL (Clo' (comp x' RET) (convE e')) ∷ s , convE e))
+  ~⟨  ~itrans (bind-assoc (eval x e)) ( bind-cong-r (eval x e)
+    ( λ {(Num _) →  never-bind; (Clo x e) → ~irefl })) ⟩
+   (do v <- eval x e
+       exec (APP (comp y RET) c) (VAL (convV v) ∷ s , convE e))
   ~⟨ spec i x ⟩
-  (exec (comp x (comp y (APP c))) (s , convE e))
+  (exec (comp x (APP (comp y RET) c)) (s , convE e))
   ∎
 
 spec i (Abs x) {s} {c} {e} =
   (do v ← eval (Abs x) e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩ -- definition of eval & conv
   (exec c (VAL (Clo' (comp x RET) (convE e)) ∷ s , convE e))
   ~⟨⟩ -- definition of exec (ABS c) 
@@ -305,7 +331,7 @@ spec i (Abs x) {s} {c} {e} =
 -- (i.e. in terms of bisimilarity).
 spec' : ∀ s c e x →
   (do v ← eval x e
-      exec c (VAL (conv v) ∷ s , convE e))
+      exec c (VAL (convV v) ∷ s , convE e))
   ~
   (exec (comp x c) (s , convE e))
 spec' s c e x =  stepped _ _  (λ i → spec i x)
@@ -320,7 +346,7 @@ compile e = comp e HALT
 
 specCompile : ∀ s x →
   (do v ← eval x []
-      return (VAL (conv v) ∷ s , []))
+      return (VAL (convV v) ∷ s , []))
   ~
   (exec (compile x) (s , []))
 specCompile s x = spec' s HALT [] x

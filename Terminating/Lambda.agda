@@ -1,7 +1,9 @@
+{-# OPTIONS --sized-types #-}
+
 -- Here we give a separate proof that the virtual machine exec for the
 -- lambda calculus is indeed well-defined.
 
-module LambdaTerminating where
+module Terminating.Lambda where
 
 open import Lambda hiding (_∎)
 
