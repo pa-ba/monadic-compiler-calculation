@@ -121,7 +121,7 @@ mutual
 -- indexed bisimilarity implies bisimilairity
 
 mutual
-  stepped : ∀ {A} {i} (a b : Partial A ∞) → (∀ i → a ~[ i ] b) → _~_ {i} a b
+  stepped : ∀ {A} {j} (a b : Partial A ∞) → (∀ i → a ~[ i ] b) → _~_ {j} a b
   stepped (now x) (now y) eq with eq 1
   ... | ~inow _ _  =  ~now x
   stepped (now x) (later y) eq with eq 1

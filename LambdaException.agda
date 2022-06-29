@@ -3,6 +3,14 @@
 ------------------------------------------------------------------------
 -- Calculation for call-by-value lambda calculus extended with
 -- integers and exceptions (including exception handling).
+--
+-- In addition to the inclusion of exceptions, we also change the
+-- semantics slightly: A type error (e.g. trying to add a number to a
+-- closure) now results in an exception instead of divergence. This
+-- was chosen to illustrate how the reasoning changes if we have two
+-- different ways of representing failure. Divergence is still used in
+-- case of an unbound variable.
+--
 ------------------------------------------------------------------------
 
 
@@ -15,7 +23,7 @@ open import Data.Maybe hiding (_>>=_)
 open import Agda.Builtin.Nat
 open import Data.Bool
 open import Data.Product 
-open import Data.List
+open import Data.List hiding (lookup)
 open import Function
 
 ---------------------
@@ -47,10 +55,10 @@ mutual
 -- https://agda.readthedocs.io/en/v2.6.2/language/lambda-abstraction.html)
 
 
-getVar : ∀ {a i} → ℕ → List a → Partial a i
-getVar 0 (x ∷ xs) = return x
-getVar (suc i) (x ∷ xs) = getVar i xs
-getVar _ _ = never
+lookup : ∀ {a i} → ℕ → List a → Partial a i
+lookup 0 (x ∷ xs) = return x
+lookup (suc i) (x ∷ xs) = lookup i xs
+lookup _ _ = never
 
 
 num : Maybe Value → Maybe ℕ
@@ -68,7 +76,6 @@ clo _ = nothing
 getClo : ∀ {i A} → Partial A i → (Expr × Env → Partial A i) → Maybe Value → Partial A i
 getClo = match clo
 
-
 mutual
   eval : ∀ {i} → Expr → Env → Partial (Maybe Value) i
   eval (Val x) e = return (just (Num x))
@@ -76,7 +83,7 @@ mutual
     eval x e >>= getNum (return nothing) λ n →
     eval y e >>= getNum (return nothing) λ m →
     return (just (Num (n + m)))
-  eval (Var i) e = do v ← getVar i e
+  eval (Var i) e = do v ← lookup i e
                       return (just v)
   eval (Abs x)   e = return (just (Clo x e))
   eval (App x y) e = eval x e >>= getClo (return nothing) λ (x' , e') →
@@ -143,7 +150,7 @@ mutual
   exec (ISNUM c) (VAL _ ∷ s , e) = fail s  e
   exec (ISCLO c) (VAL (Clo' c' e' ) ∷ s , e) = exec c (VAL (Clo' c' e') ∷ s , e)
   exec (ISCLO c) (VAL _ ∷ s , e) = fail s  e
-  exec (LOOKUP n c) (s , e) = do v <- getVar n e
+  exec (LOOKUP n c) (s , e) = do v <- lookup n e
                                  exec c (VAL v ∷ s , e)
   exec RET  (VAL u ∷ CLO c e' ∷ s , _) = exec c (VAL u ∷ s , e')
   exec (APP c) (VAL v ∷ VAL (Clo' c' e') ∷ s , e) = later (∞exec c' (CLO c e ∷ s , v ∷ e'))
@@ -196,16 +203,16 @@ mutual
 
 
 -- This is the lemma that is used in the `Var` case.
-getVar-conv : ∀ {i A} n e → (f : Value' → Partial A ∞) →
-  (getVar n e >>= λ v → f (conv v)) ~[ i ] (getVar n (convE e) >>= f)
-getVar-conv zero (x ∷ e) f =  ~irefl
-getVar-conv (suc n) (x ∷ e) f = getVar-conv n e f
-getVar-conv (suc n) [] f =  ~itrans never-bind ( ~isymm never-bind)
-getVar-conv zero [] f = ~itrans never-bind ( ~isymm never-bind)
+lookup-conv : ∀ {i A} n e → (f : Value' → Partial A ∞) →
+  (lookup n e >>= (f ∘ conv)) ~[ i ] (lookup n (convE e) >>= f)
+lookup-conv zero (x ∷ e) f =  ~irefl
+lookup-conv (suc n) (x ∷ e) f = lookup-conv n e f
+lookup-conv (suc n) [] f =  ~itrans never-bind ( ~isymm never-bind)
+lookup-conv zero [] f = ~itrans never-bind ( ~isymm never-bind)
 
 
--- This is the compiler correctness property in its i-bisimilarity
--- form. This is where the calculation happens.
+-- This is the compiler correctness property in its indexed
+-- bisimilarity form. This is where the calculation happens.
 
 
 spec : ∀ i x {s c e} →
@@ -263,14 +270,14 @@ spec i (Var n) {s} {c} {e} =
   (eval (Var n) e >>= getJust (fail s (convE e)) λ v →
    exec c (VAL (conv v) ∷ s , convE e))
   ~⟨⟩
-  ((do v ← getVar n e
+  ((do v ← lookup n e
        return (just v)) >>= getJust (fail s (convE e)) λ v →
    exec c (VAL (conv v) ∷ s , convE e))
-  ~⟨  bind-assoc (getVar n e) ⟩
-  (do v ← getVar n e
+  ~⟨  bind-assoc (lookup n e) ⟩
+  (do v ← lookup n e
       exec c (VAL (conv v) ∷ s , convE e))
-  ~⟨  getVar-conv n e _ ⟩
-  (do v ← getVar n (convE e)
+  ~⟨  lookup-conv n e _ ⟩
+  (do v ← lookup n (convE e)
       exec c (VAL v ∷ s , convE e))
   ~⟨⟩
   (exec (LOOKUP n c) (s , convE e))

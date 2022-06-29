@@ -138,7 +138,7 @@ record _~_  {A : Set} (p q : PND A ∞) : Set where
     ~div-r : q ⇓ → p ⇓
 open _~_ public
 
--- strong i-bisimilarity
+-- strong indexed bisimilarity
 record _~[_]_  {A : Set} (p : PND A ∞) (i : ℕ) (q : PND A ∞) : Set where
   constructor imk~
   field

@@ -98,8 +98,8 @@ comp (While x) c = LABEL (comp x (JMP c))
 -----------------
 
 
--- This is the compiler correctness property in its i-bisimilarity
--- form. This is where the calculation happens.
+-- This is the compiler correctness property in its indexed
+-- bisimilarity form. This is where the calculation happens.
 
 spec : ∀ i x {s c} →
   (do v ← eval x

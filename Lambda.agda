@@ -14,7 +14,8 @@ open import Data.Nat
 open import Agda.Builtin.Nat
 open import Data.Bool 
 open import Data.Product
-open import Data.List
+open import Data.List hiding (lookup)
+open import Function
 
 ---------------------
 -- Source language --
@@ -36,10 +37,10 @@ mutual
   Env = List Value
 
 
-getVar : ∀ {a i} → ℕ → List a → Partial a i
-getVar 0 (x ∷ xs) = return x
-getVar (suc i) (x ∷ xs) = getVar i xs
-getVar _ _ = never
+lookup : ∀ {a i} → ℕ → List a → Partial a i
+lookup 0 (x ∷ xs) = return x
+lookup (suc i) (x ∷ xs) = lookup i xs
+lookup _ _ = never
 
 
 -- The following two functions are used instead of partial pattern
@@ -63,7 +64,7 @@ mutual
     do n ← eval x e >>= getNum
        m ← eval y e >>= getNum
        return (Num (n + m))
-  eval (Var i) e = getVar i e
+  eval (Var i) e = lookup i e
   eval (Abs x)   e = return (Clo x e)
   eval (App x y) e = do (x' , e') <- eval x e >>= getClo
                         v <- eval y e
@@ -116,7 +117,7 @@ mutual
   exec : ∀ {i} → Code → Conf → Partial Conf i
   exec (PUSH n c) (s , e) = exec c (VAL (Num' n) ∷ s , e)
   exec (ADD c) (VAL (Num' n) ∷ VAL (Num' m) ∷ s , e) = exec c (VAL (Num' (m + n)) ∷ s , e)
-  exec (LOOKUP n c) (s , e) = do v <- getVar n e
+  exec (LOOKUP n c) (s , e) = do v <- lookup n e
                                  exec c (VAL v ∷ s , e)
   exec RET  (VAL u ∷ CLO c e' ∷ s , _) = exec c (VAL u ∷ s , e')
   exec (APP c) (VAL v ∷ VAL (Clo' c' e') ∷ s , e) = later (∞exec c' (CLO c e ∷ s , v ∷ e'))
@@ -158,17 +159,17 @@ mutual
   convE (x ∷ xs) = conv x ∷ convE xs
 
 
--- This is the lemma that is used in the `Var` case.
-getVar-conv : ∀ {i A} n e → (f : Value' → Partial A ∞) →
-  (getVar n e >>= λ v → f (conv v)) ~[ i ] (getVar n (convE e) >>= f)
-getVar-conv zero (x ∷ e) f =  ~irefl
-getVar-conv (suc n) (x ∷ e) f = getVar-conv n e f
-getVar-conv (suc n) [] f =  ~itrans never-bind ( ~isymm never-bind)
-getVar-conv zero [] f = ~itrans never-bind ( ~isymm never-bind)
+-- This is the lookup lemma that is used in the `Var` case.
+lookup-conv : ∀ {i A} n e → (f : Value' → Partial A ∞) →
+  (lookup n e >>= (f ∘ conv)) ~[ i ] (lookup n (convE e) >>= f)
+lookup-conv zero (x ∷ e) f =  ~irefl
+lookup-conv (suc n) (x ∷ e) f = lookup-conv n e f
+lookup-conv (suc n) [] f =  ~itrans never-bind ( ~isymm never-bind)
+lookup-conv zero [] f = ~itrans never-bind ( ~isymm never-bind)
 
 
--- This is the compiler correctness property in its i-bisimilarity
--- form. This is where the calculation happens.
+-- This is the compiler correctness property in its indexed
+-- bisimilarity form. This is where the calculation happens.
 
 spec : ∀ i x {s c e} →
   (do v ← eval x e
@@ -232,10 +233,10 @@ spec i (Var n) {s} {c} {e} =
   (do v ← eval (Var n) e
       exec c (VAL (conv v) ∷ s , convE e))
   ~⟨⟩
-  (do v ← getVar n e
+  (do v ← lookup n e
       exec c (VAL (conv v) ∷ s , convE e))
-  ~⟨ getVar-conv n e _ ⟩
-  (do v ← getVar n (convE e)
+  ~⟨ lookup-conv n e _ ⟩
+  (do v ← lookup n (convE e)
       exec c (VAL v ∷ s , convE e))
   ~⟨⟩
   (exec (LOOKUP n c) (s , convE e))

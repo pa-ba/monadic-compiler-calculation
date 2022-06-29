@@ -14,7 +14,7 @@ open import Data.Nat
 open import Agda.Builtin.Nat
 open import Data.Bool 
 open import Data.Product
-open import Data.List
+open import Data.List hiding (lookup)
 
 ---------------------
 -- Source language --
@@ -41,10 +41,10 @@ mutual
 
 
 
-getVar : ∀ {a i} → ℕ → List a → Partial a i
-getVar 0 (x ∷ xs) = return x
-getVar (suc i) (x ∷ xs) = getVar i xs
-getVar _ _ = never
+lookup : ∀ {a i} → ℕ → List a → Partial a i
+lookup 0 (x ∷ xs) = return x
+lookup (suc i) (x ∷ xs) = lookup i xs
+lookup _ _ = never
 
 getThunk : Thunk → Expr × Env
 getThunk (thunk x e) = x , e
@@ -71,7 +71,7 @@ mutual
        m ← eval y e >>= getNum
        return (Num (n + m))
   eval (Var i) e = do
-    x , e' ← getThunk <$> getVar i e
+    x , e' ← getThunk <$> lookup i e
     later (∞eval x e')
   eval (Abs x)   e = return (Clo x e)
   eval (App x y) e = do (x' , e') <- eval x e >>= getClo
@@ -133,7 +133,7 @@ mutual
   exec : ∀ {i} → Code → Conf → Partial Conf i
   exec (PUSH n c) (s , e) = exec c (VAL (Num' n) ∷ s , e)
   exec (ADD c) (VAL (Num' n) ∷ VAL (Num' m) ∷ s , e) = exec c (VAL (Num' (m + n)) ∷ s , e)
-  exec (LOOKUP n c) (s , e) = do c' , e' <- getThunk' <$> getVar n e
+  exec (LOOKUP n c) (s , e) = do c' , e' <- getThunk' <$> lookup n e
                                  later (∞exec c' (CLO c e  ∷ s , e'))
   exec RET  (VAL u ∷ CLO c e' ∷ s , _) = exec c (VAL u ∷ s , e')
   exec (APP c' c) (VAL (Clo' c'' e') ∷ s , e) = later (∞exec c'' (CLO c e ∷ s , thunk' c' e ∷ e'))
@@ -180,18 +180,18 @@ mutual
 
 -- -- This is the lemma that is used in the `Var` case.
 
-getVar-conv : ∀ {i A} n e → (f : Code × Env' → Partial A ∞) →
-  (getThunk <$> getVar n e >>= (λ { (x , e') → f (comp x RET , convE e')}))
-    ~[ i ] (getThunk' <$> getVar n (convE e) >>= f)
-getVar-conv zero [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
+lookup-conv : ∀ {i A} n e → (f : Code × Env' → Partial A ∞) →
+  (getThunk <$> lookup n e >>= (λ { (x , e') → f (comp x RET , convE e')}))
+    ~[ i ] (getThunk' <$> lookup n (convE e) >>= f)
+lookup-conv zero [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
             ~isymm ( ~itrans ( bind-cong-l  never-bind) never-bind))) 
-getVar-conv zero (thunk x e' ∷ e) f =  ~irefl
-getVar-conv (suc n) [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
+lookup-conv zero (thunk x e' ∷ e) f =  ~irefl
+lookup-conv (suc n) [] f = ~itrans ( bind-cong-l  never-bind) ( ~itrans never-bind (
             ~isymm ( ~itrans ( bind-cong-l  never-bind) never-bind))) 
-getVar-conv (suc n) (x ∷ e) f =  getVar-conv n e f
+lookup-conv (suc n) (x ∷ e) f =  lookup-conv n e f
 
--- This is the compiler correctness property in its i-bisimilarity
--- form. This is where the calculation happens.
+-- This is the compiler correctness property in its indexed
+-- bisimilarity form. This is where the calculation happens.
 
 spec : ∀ i x {s c e} →
   (do v ← eval x e
@@ -256,26 +256,26 @@ spec i@(suc j) (Var n) {s} {c} {e} =
   (do v ← eval (Var n) e
       exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
-    (do v <- do x , e' ← getThunk <$> getVar n e
+    (do v <- do x , e' ← getThunk <$> lookup n e
                 later (∞eval x e')
         exec c (VAL (convV v) ∷ s , convE e))
-  ~⟨ bind-assoc (getThunk <$> getVar n e) ⟩
-    (do x , e' ← getThunk <$> getVar n e
+  ~⟨ bind-assoc (getThunk <$> lookup n e) ⟩
+    (do x , e' ← getThunk <$> lookup n e
         v <- later (∞eval x e')
         exec c (VAL (convV v) ∷ s , convE e))
   ~⟨⟩
-    (do x , e' ← getThunk <$> getVar n e
+    (do x , e' ← getThunk <$> lookup n e
         v <- later (∞eval x e')
         exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE e'))
   ~⟨⟩
-    (do x , e' ← getThunk <$> getVar n e
+    (do x , e' ← getThunk <$> lookup n e
         later (∞eval x e' ∞>>= (λ v →
           exec RET (VAL (convV v) ∷ CLO c (convE e) ∷ s , convE e'))))
-  ~⟨ bind-cong-r (getThunk <$> getVar n e) (λ {(x , e') → ~ilater (spec j x)}) ⟩
-    (do x , e' ← getThunk <$> getVar n e
+  ~⟨ bind-cong-r (getThunk <$> lookup n e) (λ {(x , e') → ~ilater (spec j x)}) ⟩
+    (do x , e' ← getThunk <$> lookup n e
         later (∞exec (comp x RET) (CLO c (convE e) ∷ s , convE e')))
-  ~⟨ getVar-conv n e _ ⟩
-    (do c' , e' ← getThunk' <$> getVar n (convE e)
+  ~⟨ lookup-conv n e _ ⟩
+    (do c' , e' ← getThunk' <$> lookup n (convE e)
         later (∞exec c' (CLO c (convE e) ∷ s , e')))
   ~⟨⟩
     (exec (LOOKUP n c) (s , convE e))

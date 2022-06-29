@@ -6,7 +6,7 @@ not explicitly carried out in the paper.
 
 To typecheck all Agda files, use the included makefile by simply
 invoking `make` in this directory. All source files in this directory
-have been typechecked using version 2.6.3 of Agda and version 1.7 of
+have been typechecked using version 2.6.2.2 of Agda and version 1.7 of
 the Agda standard library.
 
 # Files
@@ -18,7 +18,8 @@ the Agda standard library.
 - [NonDeterm.agda](NonDeterm.agda): Definition of the non-determinism monad
   `ND` + proofs of its laws (section 4).
 - [PartialNonDeterm.agda](PartialNonDeterm.agda): Definition of the
-  `PND` monad that combines `Partial` and `ND` + proofs of its laws.
+  `PND` (called $ND_\bot$ in the paper) monad that combines `Partial`
+  and `ND` + proofs of its laws.
 
 ## Compiler calculations from the paper
 
@@ -66,7 +67,7 @@ this for the coinductive `Partial` type:
 codata Partial a = Now a | Later (Partial a)
 ```
 
-In Agda we use coinductive record types to represent to coinductive
+In Agda we use coinductive record types to represent coinductive
 data types. Moreover, we use sized types to help the termination
 checker to recognize productive corecursive function
 definitions. Therefore, the `Partial` type has an additional parameter
@@ -122,10 +123,36 @@ mutual
   force (∞eval x) = eval x
 ```
 
-## Do notation pattern matching
+## Partial pattern matching in do notation
 
-Agda supports pattern matching syntax in do notation similarly to
-Idris. For example, the syntax from the paper
+The Haskell syntax in the paper uses partial pattern matching in do
+notation, e.g. in the following fragment from section 3.1:
+
+```
+eval (Add x y) e = do Num m <- eval x e
+                      Num n <- eval y e
+                      return (Num (m + n))
+```
+
+To represent partial pattern matching in Agda, we use an auxiliary
+function (`getNum : ∀ {i} → Value → Partial ℕ i` for the code fragment
+above) that performs the pattern matching and behaves like the `fail`
+method if pattern matches fails:
+
+```
+eval (Add x y) e =
+  do n ← eval x e >>= getNum
+     m ← eval y e >>= getNum
+     return (Num (n + m))
+```
+
+
+
+## Idris-style pattern matching in do notation
+
+In section 4, we use a more general pattern matching syntax in do
+notation that is inspired by Idris, e.g. the following fragment from
+section 4.1:
 
 ```
 eval' (Add x y) i = do Just m ← eval x i  | return Nothing
@@ -133,7 +160,8 @@ eval' (Add x y) i = do Just m ← eval x i  | return Nothing
                        return (Just (m + n))
 ```
 
-can be translated to:
+Agda supports a similar pattern matching syntax. The above fragment
+would translate to the following Agda code:
 
 ```
 eval' (Add x y) i = do just m ← eval x i  where _ → return nothing
@@ -156,6 +184,7 @@ be proved equal. For example, we cannot prove the following equality:
 Therefore, we use helper functions that encode the desired pattern
 matching. For example, the abovementioned code from the paper is
 translated into the following Agda code.
+
 ```
 eval' (Add x y) i  =
    eval x i >>= getJust (return nothing) λ m →
@@ -163,18 +192,8 @@ eval' (Add x y) i  =
    return (just (m + n))
 ```
 
-Similarly, instead of partial pattern matching as in
-```
-eval (Add x y) e = do Num m <- eval x e
-                      Num n <- eval y e
-                      return (Num (m + n))
-```
-
-we use auxiliary function that performs the pattern matching:
+where the helper function `getJust` is of type
 
 ```
-eval (Add x y) e =
-  do n ← eval x e >>= getNum
-     m ← eval y e >>= getNum
-     return (Num (n + m))
+∀ {A B : Set} → ND B → (A → ND B) → Maybe A → ND B
 ```

@@ -13,7 +13,7 @@ open import Agda.Builtin.Nat
 open import Data.Nat
 
 open import Data.Product 
-open import Data.List
+open import Data.List hiding (lookup)
 
 -- Define the measure that is used to show that exec is well-founded
 
@@ -45,7 +45,7 @@ mutual
   exec' 0 _ _ = never
   exec' (suc j) (PUSH n c) (s , e) = exec' j c (VAL (Num' n) ∷ s , e)
   exec' (suc j) (ADD c) (VAL (Num' n) ∷ VAL (Num' m) ∷ s , e) = exec' j c (VAL (Num' (m + n)) ∷ s , e)
-  exec' (suc j) (LOOKUP n c) (s , e) = do v <- getVar n e
+  exec' (suc j) (LOOKUP n c) (s , e) = do v <- lookup n e
                                           exec' j c (VAL v ∷ s , e)
   exec' (suc j) RET  (VAL u ∷ CLO c e' ∷ s , _) = exec' j c (VAL u ∷ s , e')
   exec' _ (APP c) (VAL v ∷ VAL (Clo' c' e') ∷ s , e) = later (∞exec' c' (CLO c e ∷ s , v ∷ e'))
@@ -72,7 +72,7 @@ mutual
   execBisim (ADD c) (VAL (Num' x) ∷ CLO x₁ x₂ ∷ s , e) (suc i) _ (s≤s le) = ~irefl
   execBisim (ADD c) (VAL (Clo' x x₁) ∷ s , e) (suc i) _ (s≤s le) = ~irefl
   execBisim (ADD c) (CLO x x₁ ∷ s , e) (suc i) _ (s≤s le) =  ~irefl
-  execBisim (LOOKUP x c) (s , e) (suc i) _ (s≤s le) =  bind-cong-r (getVar x e) (λ v →  execBisim c _ _ _  le)
+  execBisim (LOOKUP x c) (s , e) (suc i) _ (s≤s le) =  bind-cong-r (lookup x e) (λ v →  execBisim c _ _ _  le)
   execBisim RET ([] , e) (suc i) _ (s≤s le) =  ~irefl
   execBisim RET (VAL x ∷ [] , e) (suc i) _ (s≤s le) = ~irefl
   execBisim RET (VAL x ∷ VAL x₁ ∷ s , e) (suc i) _ (s≤s le) = ~irefl
